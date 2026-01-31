@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0A0E27;
+  --foreground: #F3F4F6;
+  --surface: #141B3D;
+  --border: #2D3561;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4B5563;
+}
+
+/* Risk colors utility classes */
+.text-risk {
+  &-critical { color: #DC2626; }
+  &-high { color: #F59E0B; }
+  &-medium { color: #FCD34D; }
+  &-low { color: #10B981; }
+}
+
+.bg-risk {
+  &-critical { background-color: #DC2626; }
+  &-high { background-color: #F59E0B; }
+  &-medium { background-color: #FCD34D; }
+  &-low { background-color: #10B981; }
+}
+
+.border-risk {
+  &-critical { border-color: #DC2626; }
+  &-high { border-color: #F59E0B; }
+  &-medium { border-color: #FCD34D; }
+  &-low { border-color: #10B981; }
+}
+
+/* Animation for loading states */
+@keyframes pulse-risk {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-risk {
+  animation: pulse-risk 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Card glow effect */
+.card-glow {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
+}
+
+.card-glow-risk-critical {
+  box-shadow: 0 0 20px rgba(220, 38, 38, 0.2);
+}
+
+.card-glow-risk-high {
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.2);
+}
