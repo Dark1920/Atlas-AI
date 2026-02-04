@@ -16,7 +16,9 @@ from app.models.schemas import (
     TransactionCreate, Transaction, RiskAssessment, 
     TransactionListItem, TransactionListResponse,
     DashboardStats, RiskLevel, RecommendedAction,
-    FullExplanation, AuditLogEntry
+    FullExplanation, AuditLogEntry,
+    Alert, AlertListResponse, AlertStats, AlertSeverity, AlertStatus, AlertType,
+    FraudPattern, PatternListResponse
 )
 from app.models.database import (
     TransactionRecord, RiskAssessmentRecord, AuditLogRecord
@@ -24,6 +26,19 @@ from app.models.database import (
 from app.services.risk_scorer import RiskScorer
 from app.services.explainer import ExplainabilityEngine
 from app.services.audit_logger import AuditLogger
+from app.services.alert_service import get_alert_service, AlertService
+from app.services.pattern_detector import get_pattern_detector, PatternDetector
+from app.services.automation import get_automation_service, AutomationService
+from app.services.compliance import get_compliance_service, ComplianceService, ReportType
+from app.api.websocket import broadcast_transaction, broadcast_alert, broadcast_dashboard_stats
+from app.api.auth import require_api_key, create_api_key, list_api_keys, disable_api_key, enable_api_key
+from app.api.jwt_auth import (
+    authenticate_user, create_access_token, get_current_user, Token, User,
+    require_role, SECRET_KEY, ACCESS_TOKEN_EXPIRE_MINUTES
+)
+from fastapi.security import OAuth2PasswordRequestForm
+from datetime import timedelta
+from fastapi import status
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +55,7 @@ async def score_transaction(
     db: AsyncSession = Depends(get_db),
     risk_scorer: RiskScorer = Depends(get_risk_scorer),
     audit_logger: AuditLogger = Depends(get_audit_logger),
+    api_key_info: dict = Depends(require_api_key("score")),
 ):
     """
     Score a transaction for fraud risk.
@@ -67,8 +83,53 @@ async def score_transaction(
         "device": transaction.device.model_dump(),
     }
     
-    # Score transaction
-    assessment = risk_scorer.score_transaction(txn_dict)
+    # Score transaction (now async with Redis caching)
+    assessment = await risk_scorer.score_transaction(txn_dict)
+    
+    # Evaluate automation rules (Deriv automation-inspired)
+    automation_service = get_automation_service()
+    automation_results = automation_service.evaluate_rules(
+        transaction_id=txn_id,
+        risk_assessment=assessment,
+        transaction=txn_dict
+    )
+    
+    # Generate alert if high risk (Deriv SecAI-inspired)
+    alert_service = get_alert_service()
+    alert = alert_service.generate_alert(
+        transaction_id=txn_id,
+        risk_assessment=assessment,
+        transaction=txn_dict
+    )
+    
+    # Broadcast transaction via WebSocket
+    background_tasks.add_task(
+        broadcast_transaction,
+        {
+            "transaction_id": txn_id,
+            "user_id": transaction.user_id,
+            "amount": transaction.amount,
+            "merchant_category": transaction.merchant_category,
+            "risk_score": assessment.risk_score,
+            "risk_level": assessment.risk_level.value,
+            "recommended_action": assessment.recommended_action.value,
+        }
+    )
+    
+    # Broadcast alert if generated
+    if alert:
+        background_tasks.add_task(
+            broadcast_alert,
+            {
+                "id": alert.id,
+                "transaction_id": alert.transaction_id,
+                "alert_type": alert.alert_type.value,
+                "severity": alert.severity.value,
+                "title": alert.title,
+                "description": alert.description,
+                "risk_score": alert.risk_score,
+            }
+        )
     
     # Store transaction and assessment in background
     background_tasks.add_task(
@@ -87,6 +148,7 @@ async def score_transaction(
 async def score_transactions_batch(
     transactions: List[TransactionCreate],
     risk_scorer: RiskScorer = Depends(get_risk_scorer),
+    api_key_info: dict = Depends(require_api_key("score")),
 ):
     """
     Score multiple transactions in batch.
@@ -113,7 +175,7 @@ async def score_transactions_batch(
             "location": txn.location.model_dump(),
             "device": txn.device.model_dump(),
         }
-        assessment = risk_scorer.score_transaction(txn_dict)
+        assessment = await risk_scorer.score_transaction(txn_dict)
         assessments.append(assessment)
     
     return assessments
@@ -276,8 +338,8 @@ async def get_transaction_detail(
                 user=UserExplanation(**assessment_record.explanation_user),
             )
         else:
-            # Generate explanation on the fly
-            assessment.explanation = risk_scorer.get_detailed_explanation(
+            # Generate explanation on the fly (now async)
+            assessment.explanation = await risk_scorer.get_detailed_explanation(
                 txn_dict, assessment
             )
     
@@ -344,7 +406,7 @@ async def get_transaction_explanation(
         top_factors=[],
     )
     
-    return risk_scorer.get_detailed_explanation(txn_dict, assessment)
+    return await risk_scorer.get_detailed_explanation(txn_dict, assessment)
 
 
 # ============ Dashboard Endpoints ============
@@ -460,6 +522,530 @@ async def get_audit_trail(
     ]
 
 
+# ============ Alert Endpoints ============
+
+@router.get("/alerts", response_model=AlertListResponse)
+async def list_alerts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    severity: Optional[AlertSeverity] = None,
+    alert_type: Optional[AlertType] = None,
+    status: Optional[AlertStatus] = None,
+    alert_service: AlertService = Depends(lambda: get_alert_service()),
+):
+    """
+    List security alerts with filtering.
+    Inspired by Deriv's SecAI bot alert system.
+    """
+    # Get alerts from service
+    all_alerts = alert_service.get_active_alerts(
+        severity=severity,
+        alert_type=alert_type,
+        limit=1000
+    )
+    
+    # Filter by status if provided
+    if status:
+        all_alerts = [a for a in all_alerts if a.status == status]
+    
+    # Paginate
+    total = len(all_alerts)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_alerts = all_alerts[start:end]
+    
+    # Convert to response models
+    alerts = [
+        Alert(
+            id=a.id,
+            transaction_id=a.transaction_id,
+            alert_type=AlertType(a.alert_type.value),
+            severity=AlertSeverity(a.severity.value),
+            status=AlertStatus(a.status.value),
+            title=a.title,
+            description=a.description,
+            risk_score=a.risk_score,
+            risk_level=a.risk_level,
+            metadata=a.metadata,
+            created_at=a.created_at,
+            acknowledged_at=a.acknowledged_at,
+            acknowledged_by=a.acknowledged_by,
+            resolved_at=a.resolved_at,
+            resolved_by=a.metadata.get("resolved_by"),
+        )
+        for a in paginated_alerts
+    ]
+    
+    return AlertListResponse(
+        alerts=alerts,
+        total=total,
+        page=page,
+        page_size=page_size,
+        has_more=total > end
+    )
+
+
+@router.get("/alerts/{alert_id}", response_model=Alert)
+async def get_alert_detail(
+    alert_id: str,
+    alert_service: AlertService = Depends(lambda: get_alert_service()),
+):
+    """Get alert details."""
+    alert = alert_service.get_alert(alert_id)
+    
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    
+    return Alert(
+        id=alert.id,
+        transaction_id=alert.transaction_id,
+        alert_type=AlertType(alert.alert_type.value),
+        severity=AlertSeverity(alert.severity.value),
+        status=AlertStatus(alert.status.value),
+        title=alert.title,
+        description=alert.description,
+        risk_score=alert.risk_score,
+        risk_level=alert.risk_level,
+        metadata=alert.metadata,
+        created_at=alert.created_at,
+        acknowledged_at=alert.acknowledged_at,
+        acknowledged_by=alert.acknowledged_by,
+        resolved_at=alert.resolved_at,
+        resolved_by=alert.metadata.get("resolved_by"),
+    )
+
+
+@router.post("/alerts/{alert_id}/acknowledge", response_model=Alert)
+async def acknowledge_alert(
+    alert_id: str,
+    acknowledged_by: str = Query(..., description="User/operator ID"),
+    notes: Optional[str] = Query(None, description="Optional notes"),
+    alert_service: AlertService = Depends(lambda: get_alert_service()),
+):
+    """Acknowledge an alert."""
+    alert = alert_service.acknowledge_alert(
+        alert_id=alert_id,
+        acknowledged_by=acknowledged_by,
+        notes=notes
+    )
+    
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    
+    return Alert(
+        id=alert.id,
+        transaction_id=alert.transaction_id,
+        alert_type=AlertType(alert.alert_type.value),
+        severity=AlertSeverity(alert.severity.value),
+        status=AlertStatus(alert.status.value),
+        title=alert.title,
+        description=alert.description,
+        risk_score=alert.risk_score,
+        risk_level=alert.risk_level,
+        metadata=alert.metadata,
+        created_at=alert.created_at,
+        acknowledged_at=alert.acknowledged_at,
+        acknowledged_by=alert.acknowledged_by,
+        resolved_at=alert.resolved_at,
+        resolved_by=alert.metadata.get("resolved_by"),
+    )
+
+
+@router.post("/alerts/{alert_id}/resolve", response_model=Alert)
+async def resolve_alert(
+    alert_id: str,
+    resolved_by: str = Query(..., description="User/operator ID"),
+    resolution: str = Query(..., description="Resolution description"),
+    alert_service: AlertService = Depends(lambda: get_alert_service()),
+):
+    """Resolve an alert."""
+    alert = alert_service.resolve_alert(
+        alert_id=alert_id,
+        resolved_by=resolved_by,
+        resolution=resolution
+    )
+    
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    
+    return Alert(
+        id=alert.id,
+        transaction_id=alert.transaction_id,
+        alert_type=AlertType(alert.alert_type.value),
+        severity=AlertSeverity(alert.severity.value),
+        status=AlertStatus(alert.status.value),
+        title=alert.title,
+        description=alert.description,
+        risk_score=alert.risk_score,
+        risk_level=alert.risk_level,
+        metadata=alert.metadata,
+        created_at=alert.created_at,
+        acknowledged_at=alert.acknowledged_at,
+        acknowledged_by=alert.acknowledged_by,
+        resolved_at=alert.resolved_at,
+        resolved_by=alert.metadata.get("resolved_by"),
+    )
+
+
+@router.get("/alerts/stats", response_model=AlertStats)
+async def get_alert_stats(
+    alert_service: AlertService = Depends(lambda: get_alert_service()),
+):
+    """Get alert statistics."""
+    stats = alert_service.get_alert_stats()
+    
+    return AlertStats(
+        active_alerts=stats["active_alerts"],
+        total_alerts=stats["total_alerts"],
+        by_severity=stats["by_severity"],
+        by_type=stats["by_type"],
+    )
+
+
+# ============ Pattern Detection Endpoints ============
+
+@router.get("/patterns", response_model=PatternListResponse)
+async def list_patterns(
+    pattern_type: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    pattern_detector: PatternDetector = Depends(lambda: get_pattern_detector()),
+):
+    """
+    List detected fraud patterns.
+    Inspired by Deriv's ThreatHunter pattern detection.
+    """
+    patterns = pattern_detector.get_all_patterns(
+        pattern_type=pattern_type,
+        limit=limit
+    )
+    
+    return PatternListResponse(
+        patterns=[
+            FraudPattern(
+                id=p.id,
+                pattern_type=p.pattern_type,
+                description=p.description,
+                confidence=p.confidence,
+                affected_transactions=p.affected_transactions,
+                affected_users=p.affected_users,
+                metadata=p.metadata,
+                detected_at=p.detected_at,
+            )
+            for p in patterns
+        ],
+        total=len(patterns)
+    )
+
+
+@router.get("/patterns/{pattern_id}", response_model=FraudPattern)
+async def get_pattern_detail(
+    pattern_id: str,
+    pattern_detector: PatternDetector = Depends(lambda: get_pattern_detector()),
+):
+    """Get pattern details."""
+    pattern = pattern_detector.get_pattern(pattern_id)
+    
+    if not pattern:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+    
+    return FraudPattern(
+        id=pattern.id,
+        pattern_type=pattern.pattern_type,
+        description=pattern.description,
+        confidence=pattern.confidence,
+        affected_transactions=pattern.affected_transactions,
+        affected_users=pattern.affected_users,
+        metadata=pattern.metadata,
+        detected_at=pattern.detected_at,
+    )
+
+
+@router.post("/patterns/analyze")
+async def analyze_patterns(
+    db: AsyncSession = Depends(get_db),
+    pattern_detector: PatternDetector = Depends(lambda: get_pattern_detector()),
+):
+    """
+    Trigger pattern analysis on recent transactions.
+    """
+    # Get recent high-risk transactions
+    from datetime import timedelta
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    
+    result = await db.execute(
+        select(TransactionRecord, RiskAssessmentRecord)
+        .join(RiskAssessmentRecord, TransactionRecord.id == RiskAssessmentRecord.transaction_id)
+        .where(TransactionRecord.timestamp >= cutoff)
+        .where(RiskAssessmentRecord.risk_score >= 60)
+        .limit(1000)
+    )
+    
+    rows = result.all()
+    
+    # Convert to dictionaries
+    transactions = []
+    risk_assessments = {}
+    
+    for txn, assessment in rows:
+        txn_dict = {
+            "transaction_id": txn.id,
+            "user_id": txn.user_id,
+            "amount": txn.amount,
+            "merchant_id": txn.merchant_id,
+            "merchant_category": txn.merchant_category,
+            "timestamp": txn.timestamp,
+            "location": {
+                "country": txn.location_country,
+                "city": txn.location_city,
+                "latitude": txn.location_lat,
+                "longitude": txn.location_lon,
+            },
+            "device": {
+                "fingerprint": txn.device_fingerprint,
+                "type": txn.device_type,
+            }
+        }
+        transactions.append(txn_dict)
+        risk_assessments[txn.id] = {
+            "risk_score": assessment.risk_score,
+            "risk_level": assessment.risk_level,
+        }
+    
+    # Detect patterns
+    patterns = pattern_detector.detect_patterns(transactions, risk_assessments)
+    
+    return {
+        "analyzed_transactions": len(transactions),
+        "patterns_detected": len(patterns),
+        "patterns": [
+            {
+                "id": p.id,
+                "pattern_type": p.pattern_type,
+                "description": p.description,
+                "confidence": p.confidence,
+                "affected_transactions": len(p.affected_transactions),
+                "affected_users": len(p.affected_users),
+            }
+            for p in patterns
+        ]
+    }
+
+
+# ============ Automation Endpoints ============
+
+@router.get("/automation/rules")
+async def list_automation_rules(
+    enabled_only: bool = Query(False),
+    automation_service: AutomationService = Depends(lambda: get_automation_service()),
+):
+    """List automation rules."""
+    rules = automation_service.get_all_rules(enabled_only=enabled_only)
+    
+    return {
+        "rules": [
+            {
+                "id": r.id,
+                "name": r.name,
+                "description": r.description,
+                "rule_type": r.rule_type.value,
+                "enabled": r.enabled,
+                "conditions": r.conditions,
+                "execution_count": r.execution_count,
+                "last_executed_at": r.last_executed_at.isoformat() if r.last_executed_at else None,
+            }
+            for r in rules
+        ]
+    }
+
+
+@router.get("/automation/stats")
+async def get_automation_stats(
+    automation_service: AutomationService = Depends(lambda: get_automation_service()),
+):
+    """Get automation statistics."""
+    return automation_service.get_automation_stats()
+
+
+@router.get("/automation/log")
+async def get_automation_log(
+    rule_id: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=1000),
+    automation_service: AutomationService = Depends(lambda: get_automation_service()),
+):
+    """Get automation execution log."""
+    return {
+        "executions": automation_service.get_execution_log(rule_id=rule_id, limit=limit)
+    }
+
+
+# ============ JWT Authentication Endpoints ============
+
+@router.post("/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    """
+    Login endpoint for dashboard users.
+    Returns JWT access token.
+    """
+    user = authenticate_user(form_data.username, form_data.password)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["username"], "role": user["role"]},
+        expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.get("/auth/me", response_model=User)
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """Get current user information."""
+    return current_user
+
+
+# ============ API Key Management Endpoints ============
+
+@router.post("/auth/api-keys")
+async def create_api_key_endpoint(
+    name: str = Query(..., description="API key name"),
+    scopes: List[str] = Query(["score", "read"], description="Allowed scopes"),
+):
+    """Create a new API key."""
+    api_key = create_api_key(name=name, scopes=scopes)
+    return {
+        "api_key": api_key,
+        "name": name,
+        "scopes": scopes,
+        "message": "Store this API key securely. It will not be shown again."
+    }
+
+
+@router.get("/auth/api-keys")
+async def list_api_keys_endpoint():
+    """List all API keys."""
+    return {"api_keys": list_api_keys()}
+
+
+@router.post("/auth/api-keys/{key_prefix}/disable")
+async def disable_api_key_endpoint(key_prefix: str):
+    """Disable an API key (by prefix)."""
+    # Find key by prefix
+    from app.api.auth import _api_keys
+    matching_key = None
+    for key in _api_keys.keys():
+        if key.startswith(key_prefix):
+            matching_key = key
+            break
+    
+    if not matching_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    disable_api_key(matching_key)
+    return {"message": "API key disabled"}
+
+
+@router.post("/auth/api-keys/{key_prefix}/enable")
+async def enable_api_key_endpoint(key_prefix: str):
+    """Enable an API key (by prefix)."""
+    # Find key by prefix
+    from app.api.auth import _api_keys
+    matching_key = None
+    for key in _api_keys.keys():
+        if key.startswith(key_prefix):
+            matching_key = key
+            break
+    
+    if not matching_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    enable_api_key(matching_key)
+    return {"message": "API key enabled"}
+
+
+# ============ Compliance Reporting Endpoints ============
+
+@router.post("/compliance/reports/daily-summary")
+async def generate_daily_summary_report(
+    date: Optional[datetime] = Query(None, description="Date for report (defaults to today)"),
+    db: AsyncSession = Depends(get_db),
+    compliance_service: ComplianceService = Depends(lambda: get_compliance_service()),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate daily summary compliance report."""
+    if not date:
+        date = datetime.utcnow()
+    
+    start_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = start_date + timedelta(days=1)
+    
+    # Get dashboard stats
+    stats_result = await get_dashboard_stats(db=db)
+    stats = stats_result.model_dump() if hasattr(stats_result, 'model_dump') else stats_result
+    
+    report = compliance_service.generate_daily_summary(
+        start_date=start_date,
+        end_date=end_date,
+        stats=stats
+    )
+    
+    return report
+
+
+@router.get("/compliance/reports")
+async def list_compliance_reports(
+    report_type: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    compliance_service: ComplianceService = Depends(lambda: get_compliance_service()),
+    current_user: User = Depends(get_current_user),
+):
+    """List compliance reports."""
+    report_type_enum = None
+    if report_type:
+        try:
+            report_type_enum = ReportType(report_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid report type: {report_type}")
+    
+    reports = compliance_service.list_reports(
+        report_type=report_type_enum,
+        limit=limit
+    )
+    
+    return {"reports": reports, "total": len(reports)}
+
+
+@router.get("/compliance/reports/{report_id}")
+async def get_compliance_report(
+    report_id: str,
+    format: str = Query("json", regex="^(json|csv)$"),
+    compliance_service: ComplianceService = Depends(lambda: get_compliance_service()),
+    current_user: User = Depends(get_current_user),
+):
+    """Get compliance report."""
+    if format == "csv":
+        csv_data = compliance_service.export_report_csv(report_id)
+        if csv_data:
+            from fastapi.responses import Response
+            return Response(
+                content=csv_data,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={report_id}.csv"}
+            )
+        raise HTTPException(status_code=404, detail="Report not found or cannot be exported as CSV")
+    else:
+        report = compliance_service.get_report(report_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return report
+
+
 # ============ Demo Data Endpoint ============
 
 @router.post("/demo/generate")
@@ -522,7 +1108,7 @@ async def generate_demo_data(
         txn_dict["location"] = txn.location.model_dump()
         txn_dict["device"] = txn.device.model_dump()
         
-        assessment = risk_scorer.score_transaction(txn_dict)
+        assessment = await risk_scorer.score_transaction(txn_dict)
         
         # Store in database
         await store_transaction_and_assessment(

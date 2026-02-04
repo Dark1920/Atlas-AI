@@ -143,30 +143,74 @@ class FeatureEngineer:
     def __init__(self):
         self._user_profiles: Dict[str, UserProfile] = {}
         self._recent_transactions: Dict[str, List[Dict]] = {}
+        # Redis cache will be initialized lazily
+        self._cache = None
     
-    def get_user_profile(self, user_id: str) -> UserProfile:
-        """Get or create user profile."""
+    def _get_cache(self):
+        """Get Redis cache instance (lazy initialization)."""
+        if self._cache is None:
+            from app.services.redis_cache import get_cache
+            self._cache = get_cache()
+        return self._cache
+    
+    async def get_user_profile(self, user_id: str) -> UserProfile:
+        """Get or create user profile (with Redis caching)."""
+        # Try Redis cache first
+        cache = self._get_cache()
+        cached_profile = await cache.get_user_profile(user_id)
+        
+        if cached_profile:
+            # Reconstruct UserProfile from cache
+            profile = UserProfile(
+                user_id=cached_profile.get("user_id", user_id),
+                avg_amount=cached_profile.get("avg_amount", 100.0),
+                std_amount=cached_profile.get("std_amount", 50.0),
+                avg_txn_per_day=cached_profile.get("avg_txn_per_day", 2.0),
+                total_transactions=cached_profile.get("total_transactions", 0),
+                common_countries=cached_profile.get("common_countries", ["US"]),
+                known_devices=cached_profile.get("known_devices", []),
+                last_location=tuple(cached_profile["last_location"]) if cached_profile.get("last_location") else None,
+                last_transaction_at=datetime.fromisoformat(cached_profile["last_transaction_at"]) if cached_profile.get("last_transaction_at") else None,
+                typical_hours=cached_profile.get("typical_hours", list(range(8, 22))),
+                fraud_count=cached_profile.get("fraud_count", 0),
+            )
+            # Store in memory cache too
+            self._user_profiles[user_id] = profile
+            return profile
+        
+        # Fallback to memory cache
         if user_id not in self._user_profiles:
             self._user_profiles[user_id] = UserProfile(user_id=user_id)
         return self._user_profiles[user_id]
     
-    def update_user_profile(self, user_id: str, transaction: Dict[str, Any]):
-        """Update user profile after transaction."""
-        profile = self.get_user_profile(user_id)
+    async def update_user_profile(self, user_id: str, transaction: Dict[str, Any]):
+        """Update user profile after transaction (with Redis caching)."""
+        profile = await self.get_user_profile(user_id)
+        cache = self._get_cache()
+        
+        # Get cached transactions or use memory cache
+        cached_txns = await cache.get_recent_transactions(user_id)
+        if cached_txns:
+            self._recent_transactions[user_id] = cached_txns
         
         # Update transaction history
         if user_id not in self._recent_transactions:
             self._recent_transactions[user_id] = []
         
-        self._recent_transactions[user_id].append({
+        txn_data = {
             "amount": transaction.get("amount", 0),
             "timestamp": transaction.get("timestamp", datetime.utcnow()),
             "location": transaction.get("location", {}),
             "device": transaction.get("device", {}),
-        })
+        }
+        
+        self._recent_transactions[user_id].append(txn_data)
         
         # Keep only last 100 transactions
         self._recent_transactions[user_id] = self._recent_transactions[user_id][-100:]
+        
+        # Cache transaction in Redis
+        await cache.add_transaction(user_id, txn_data)
         
         # Update profile statistics
         amounts = [t["amount"] for t in self._recent_transactions[user_id]]
@@ -190,14 +234,29 @@ class FeatureEngineer:
             profile.common_countries.append(country)
         
         profile.last_transaction_at = transaction.get("timestamp", datetime.utcnow())
+        
+        # Cache updated profile in Redis
+        await cache.set_user_profile(user_id, {
+            "user_id": profile.user_id,
+            "avg_amount": profile.avg_amount,
+            "std_amount": profile.std_amount,
+            "avg_txn_per_day": profile.avg_txn_per_day,
+            "total_transactions": profile.total_transactions,
+            "common_countries": profile.common_countries,
+            "known_devices": profile.known_devices,
+            "last_location": list(profile.last_location) if profile.last_location else None,
+            "last_transaction_at": profile.last_transaction_at.isoformat() if profile.last_transaction_at else None,
+            "typical_hours": profile.typical_hours,
+            "fraud_count": profile.fraud_count,
+        })
     
-    def extract_features(
+    async def extract_features(
         self,
         transaction: Dict[str, Any],
         user_profile: Optional[UserProfile] = None
     ) -> Dict[str, float]:
         """
-        Extract all features from a transaction.
+        Extract all features from a transaction (with Redis caching).
         
         Args:
             transaction: Transaction data dictionary
@@ -209,7 +268,7 @@ class FeatureEngineer:
         user_id = transaction.get("user_id", "unknown")
         
         if user_profile is None:
-            user_profile = self.get_user_profile(user_id)
+            user_profile = await self.get_user_profile(user_id)
         
         features = {}
         
@@ -219,17 +278,17 @@ class FeatureEngineer:
         # Temporal features
         features.update(self._extract_temporal_features(transaction, user_profile))
         
-        # Velocity features
-        features.update(self._extract_velocity_features(transaction, user_id))
+        # Velocity features (uses Redis cache)
+        features.update(await self._extract_velocity_features(transaction, user_id))
         
-        # Location features
-        features.update(self._extract_location_features(transaction, user_profile))
+        # Location features (uses Redis cache for country risk)
+        features.update(await self._extract_location_features(transaction, user_profile))
         
         # Device features
         features.update(self._extract_device_features(transaction, user_profile))
         
-        # Merchant features
-        features.update(self._extract_merchant_features(transaction))
+        # Merchant features (uses Redis cache)
+        features.update(await self._extract_merchant_features(transaction))
         
         # User behavior features
         features.update(self._extract_user_behavior_features(transaction, user_profile))
@@ -295,15 +354,21 @@ class FeatureEngineer:
             "is_unusual_hour": is_unusual_hour,
         }
     
-    def _extract_velocity_features(
+    async def _extract_velocity_features(
         self,
         transaction: Dict[str, Any],
         user_id: str
     ) -> Dict[str, float]:
-        """Extract transaction velocity features."""
+        """Extract transaction velocity features (with Redis caching)."""
         timestamp = transaction.get("timestamp", datetime.utcnow())
         if isinstance(timestamp, str):
             timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        
+        # Try Redis cache first
+        cache = self._get_cache()
+        cached_txns = await cache.get_recent_transactions(user_id)
+        if cached_txns:
+            self._recent_transactions[user_id] = cached_txns
         
         recent_txns = self._recent_transactions.get(user_id, [])
         
@@ -336,19 +401,24 @@ class FeatureEngineer:
             "velocity_score": velocity_score,
         }
     
-    def _extract_location_features(
+    async def _extract_location_features(
         self,
         transaction: Dict[str, Any],
         profile: UserProfile
     ) -> Dict[str, float]:
-        """Extract location-related features."""
+        """Extract location-related features (with Redis caching)."""
         location = transaction.get("location", {})
         country = location.get("country", "US")
         lat = location.get("latitude")
         lon = location.get("longitude")
         
-        # Country risk
-        country_risk = COUNTRY_RISK_SCORES.get(country, 0.5)
+        # Country risk (check Redis cache first)
+        cache = self._get_cache()
+        country_risk = await cache.get_country_risk(country)
+        if country_risk is None:
+            country_risk = COUNTRY_RISK_SCORES.get(country, 0.5)
+            # Cache it for future use
+            await cache.set_country_risk(country, country_risk)
         
         # Distance from last known location
         distance_km = 0.0
@@ -406,11 +476,18 @@ class FeatureEngineer:
             "device_risk_score": device_risk,
         }
     
-    def _extract_merchant_features(self, transaction: Dict[str, Any]) -> Dict[str, float]:
-        """Extract merchant-related features."""
+    async def _extract_merchant_features(self, transaction: Dict[str, Any]) -> Dict[str, float]:
+        """Extract merchant-related features (with Redis caching)."""
         category = transaction.get("merchant_category", "retail").lower()
         
-        category_risk = MERCHANT_CATEGORY_RISK.get(category, 0.3)
+        # Check Redis cache first
+        cache = self._get_cache()
+        category_risk = await cache.get_merchant_risk(category)
+        if category_risk is None:
+            category_risk = MERCHANT_CATEGORY_RISK.get(category, 0.3)
+            # Cache it for future use
+            await cache.set_merchant_risk(category, category_risk)
+        
         is_high_risk = 1.0 if category_risk >= 0.5 else 0.0
         
         return {

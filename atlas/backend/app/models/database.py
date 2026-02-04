@@ -180,6 +180,44 @@ class UserProfile(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AlertRecord(Base):
+    """Security alert records."""
+    __tablename__ = "alerts"
+    
+    id = Column(String(50), primary_key=True)
+    transaction_id = Column(String(50), nullable=False, index=True)
+    
+    # Alert details
+    alert_type = Column(String(50), nullable=False)
+    severity = Column(String(20), nullable=False)
+    status = Column(String(20), default="active")
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    
+    # Risk context
+    risk_score = Column(Integer, nullable=False)
+    risk_level = Column(String(20), nullable=False)
+    
+    # Metadata
+    metadata = Column(JSON, default=dict)
+    
+    # Acknowledgment/Resolution
+    acknowledged_at = Column(DateTime)
+    acknowledged_by = Column(String(50))
+    resolved_at = Column(DateTime)
+    resolved_by = Column(String(50))
+    resolution = Column(Text)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    __table_args__ = (
+        Index('idx_alert_status', 'status'),
+        Index('idx_alert_severity', 'severity'),
+        Index('idx_alert_created', 'created_at'),
+    )
+
+
 # Async engine and session
 async_engine = create_async_engine(
     settings.database_url,

@@ -29,13 +29,13 @@ class RiskScorer:
         self.feature_engineer = FeatureEngineer()
         self.model = model_manager
     
-    def score_transaction(
+    async def score_transaction(
         self,
         transaction: Dict[str, Any],
         include_explanation: bool = True
     ) -> RiskAssessment:
         """
-        Score a transaction for fraud risk.
+        Score a transaction for fraud risk (with Redis caching).
         
         Args:
             transaction: Transaction data dictionary
@@ -52,8 +52,8 @@ class RiskScorer:
             transaction_id = f"txn_{uuid.uuid4().hex[:12]}"
             transaction["transaction_id"] = transaction_id
         
-        # Extract features
-        features_dict = self.feature_engineer.extract_features(transaction)
+        # Extract features (now async with Redis caching)
+        features_dict = await self.feature_engineer.extract_features(transaction)
         features_vector = self.feature_engineer.get_feature_vector(features_dict)
         
         # Model inference
@@ -95,10 +95,10 @@ class RiskScorer:
             explanation=None  # Filled separately if needed
         )
         
-        # Update user profile for future scoring
+        # Update user profile for future scoring (now async with Redis caching)
         user_id = transaction.get("user_id")
         if user_id:
-            self.feature_engineer.update_user_profile(user_id, transaction)
+            await self.feature_engineer.update_user_profile(user_id, transaction)
         
         logger.info(
             f"Transaction {transaction_id} scored: {risk_score} ({risk_level.value}) "
@@ -183,7 +183,7 @@ class RiskScorer:
         contributions.sort(key=lambda x: abs(x.impact), reverse=True)
         return contributions[:top_n]
     
-    def get_detailed_explanation(
+    async def get_detailed_explanation(
         self,
         transaction: Dict[str, Any],
         assessment: RiskAssessment
@@ -195,8 +195,8 @@ class RiskScorer:
         from app.services.explainer import ExplainabilityEngine
         explainer = ExplainabilityEngine()
         
-        # Get features and SHAP values
-        features_dict = self.feature_engineer.extract_features(transaction)
+        # Get features and SHAP values (now async)
+        features_dict = await self.feature_engineer.extract_features(transaction)
         features_vector = self.feature_engineer.get_feature_vector(features_dict)
         shap_values = self.model.get_shap_values(features_vector)[0]
         

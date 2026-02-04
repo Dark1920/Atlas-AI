@@ -9,6 +9,8 @@ from app.services.risk_scorer import RiskScorer
 from app.services.explainer import ExplainabilityEngine
 from app.services.feature_engine import FeatureEngineer
 from app.services.audit_logger import AuditLogger
+from app.services.redis_cache import get_cache, RedisCache
+from app.services.alert_service import get_alert_service, AlertService
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -57,3 +59,13 @@ def get_audit_logger() -> AuditLogger:
     if _audit_logger is None:
         _audit_logger = AuditLogger()
     return _audit_logger
+
+
+def get_redis_cache() -> RedisCache:
+    """Get Redis cache instance."""
+    return get_cache()
+
+
+def get_alert_service_dep() -> AlertService:
+    """Get alert service instance."""
+    return get_alert_service()

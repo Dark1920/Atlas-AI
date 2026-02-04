@@ -11,6 +11,7 @@ import logging
 
 from app.config import settings
 from app.api.routes import router as api_router
+from app.api.websocket import ws_router
 from app.models.database import init_db
 
 # Configure logging
@@ -93,6 +94,9 @@ async def readiness_check():
 
 # Include API routes
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+
+# Include WebSocket routes
+app.include_router(ws_router)
 
 
 if __name__ == "__main__":

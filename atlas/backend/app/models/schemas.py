@@ -193,3 +193,86 @@ class AuditLogEntry(BaseModel):
     model_version: str
     operator_id: Optional[str] = None
     notes: Optional[str] = None
+
+
+# Alert Schemas
+class AlertSeverity(str, Enum):
+    """Alert severity levels."""
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class AlertStatus(str, Enum):
+    """Alert status."""
+    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+
+
+class AlertType(str, Enum):
+    """Alert types."""
+    HIGH_RISK_TRANSACTION = "high_risk_transaction"
+    FRAUD_PATTERN = "fraud_pattern"
+    VELOCITY_ANOMALY = "velocity_anomaly"
+    LOCATION_ANOMALY = "location_anomaly"
+    DEVICE_ANOMALY = "device_anomaly"
+    AMOUNT_ANOMALY = "amount_anomaly"
+    MULTIPLE_FLAGS = "multiple_flags"
+
+
+class Alert(BaseModel):
+    """Security alert."""
+    id: str
+    transaction_id: str
+    alert_type: AlertType
+    severity: AlertSeverity
+    status: AlertStatus
+    title: str
+    description: str
+    risk_score: int
+    risk_level: RiskLevel
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[str] = None
+
+
+class AlertListResponse(BaseModel):
+    """Alert list response."""
+    alerts: List[Alert]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+
+
+class AlertStats(BaseModel):
+    """Alert statistics."""
+    active_alerts: int
+    total_alerts: int
+    by_severity: Dict[str, int]
+    by_type: Dict[str, int]
+
+
+# Pattern Detection Schemas
+class FraudPattern(BaseModel):
+    """Detected fraud pattern."""
+    id: str
+    pattern_type: str
+    description: str
+    confidence: float
+    affected_transactions: List[str]
+    affected_users: List[str]
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    detected_at: datetime
+
+
+class PatternListResponse(BaseModel):
+    """Pattern list response."""
+    patterns: List[FraudPattern]
+    total: int
