@@ -72,12 +72,11 @@ A production-grade, explainable AI system for real-time financial risk and fraud
 - **TanStack Query** for data fetching
 
 ## Quick Start
->>>>>>> demilade
 
 ### Prerequisites
 - Python 3.11+
 - Node.js 18+
-<<<<<<< HEAD
+  
 
 ### Installation
 ```bash
@@ -351,7 +350,7 @@ This MVP version excludes enterprise features:
 ## Authors
 
 - **MADIEGA S AIDA JUSTINE** - Lead Developer
-- **Demilade Ayeku** - Collaborator
+- **DEMILADE AYEKU** - Collaborator
 
 ## License
 
@@ -362,4 +361,4 @@ MIT License - see LICENSE file for details.
 - SHAP library for model interpretability
 - LightGBM for efficient gradient boosting
 - Kaggle Credit Card Fraud Detection dataset for inspiration
->>>>>>> demilade
+
