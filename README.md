@@ -38,7 +38,7 @@ Trading platforms lose **millions** to:
 - Chart.js (visualizations)
 
 ## 🚀 Quick Start
-=======
+
 # Atlas - Explainable AI Fraud Detection System
 
 A production-grade, explainable AI system for real-time financial risk and fraud detection. Atlas analyzes transaction patterns, assigns risk scores with millisecond-level latency, and provides crystal-clear explanations that satisfy both end-users and regulatory auditors.
