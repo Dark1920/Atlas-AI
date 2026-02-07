@@ -1,0 +1,2 @@
+# This directory stores trained ML models
+# Run `python -m app.ml.train` to generate models

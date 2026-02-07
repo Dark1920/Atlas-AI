@@ -1,0 +1,29 @@
+version: '3.8'
+
+# Development docker-compose - only runs infrastructure
+# Use for local development with hot reloading
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: atlas-postgres-dev
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: atlas
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: atlas-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_dev:/data
+
+volumes:
+  postgres_data_dev:
+  redis_data_dev:
