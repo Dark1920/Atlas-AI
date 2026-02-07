@@ -284,17 +284,6 @@ class Base(DeclarativeBase):
     pass
 
 
-# Exemple de modèle (tu gardes tous tes modèles existants)
-class TransactionRecord(Base):
-    __tablename__ = "transactions"
-    id = Column(String(50), primary_key=True)
-    user_id = Column(String(50), nullable=False, index=True)
-    amount = Column(Float, nullable=False)
-    currency = Column(String(3), default="USD")
-    timestamp = Column(DateTime, nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
 # ✅ Configuration de la base de données
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -327,5 +316,3 @@ async def get_async_session() -> AsyncSession:
     """Get async database session."""
     async with async_session_maker() as session:
         yield session
-
-
