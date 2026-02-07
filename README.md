@@ -1,7 +1,5 @@
-<<<<<<< HEAD
-# 🎯 Atlas AI - Behavioral Risk Intelligence System
 
-![Atlas AI Banner](https://via.placeholder.com/800x200/4F46E5/FFFFFF?text=Atlas+AI+-+Risk+Intelligence)
+# 🎯 Atlas AI - Behavioral Risk Intelligence System
 
 ## 🚨 The Problem
 
@@ -158,10 +156,16 @@ User Actions → Feature Extraction → ML Models → Risk Score → Action
                                     └─ SHAP Explainer
 ```
 
-## 👥 Team
 
-- **[Your Name]** - ML Engineer
-- **[Teammate]** - Full Stack Developer
+
+## Team Roles
+
+- **MADIEGA S AIDA JUSTINE ** – ML Engineer  
+  Responsible for deployment, testing, and bug fixing to ensure Atlas AI runs reliably in production.
+
+- **DEMILADE AYEKU ** – Full Stack Developer  
+  Developed the backend and frontend of Atlas AI, handling APIs, database models, and user interface integration.
+
 
 ## 📄 License
 
