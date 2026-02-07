@@ -257,6 +257,11 @@
 #         await conn.run_sync(Base.metadata.create_all)
 #     logger.info("Database tables created successfully")
 
+# async def get_async_session() -> AsyncSession:
+#     """Get async database session."""
+#     async with async_session_maker() as session:
+#         yield session
+
 """
 SQLAlchemy Database Models and Connection
 """
@@ -324,7 +329,3 @@ async def get_async_session() -> AsyncSession:
     async with async_session_maker() as session:
         yield session
 
-# async def get_async_session() -> AsyncSession:
-#     """Get async database session."""
-#     async with async_session_maker() as session:
-#         yield session
