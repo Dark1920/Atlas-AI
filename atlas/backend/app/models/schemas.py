@@ -93,6 +93,9 @@ class TechnicalExplanation(BaseModel):
     shap_values: Dict[str, float]
     feature_values: Dict[str, Any]
     confidence_interval: tuple[float, float]
+    
+    class Config:
+        protected_namespaces = ()
 
 
 class RiskFactor(BaseModel):
@@ -193,6 +196,9 @@ class AuditLogEntry(BaseModel):
     model_version: str
     operator_id: Optional[str] = None
     notes: Optional[str] = None
+    
+    class Config:
+        protected_namespaces = ()
 
 
 # Alert Schemas
@@ -234,7 +240,7 @@ class Alert(BaseModel):
     description: str
     risk_score: int
     risk_level: RiskLevel
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    alert_metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     acknowledged_at: Optional[datetime] = None
     acknowledged_by: Optional[str] = None
@@ -268,7 +274,7 @@ class FraudPattern(BaseModel):
     confidence: float
     affected_transactions: List[str]
     affected_users: List[str]
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    pattern_metadata: Dict[str, Any] = Field(default_factory=dict)
     detected_at: datetime
 
 

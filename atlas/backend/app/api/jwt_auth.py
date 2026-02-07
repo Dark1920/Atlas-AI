@@ -24,21 +24,24 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 # In-memory user store (in production, use database)
-# Format: {username: {"username": str, "hashed_password": str, "role": str, "enabled": bool}}
+# Format: {username: {"username": str, "password": str, "role": str, "enabled": bool}}
 _users: dict[str, dict] = {
     "admin": {
         "username": "admin",
-        "hashed_password": pwd_context.hash("admin123"),  # Change in production!
+        "password": "admin123",  # Change in production!
         "role": "admin",
         "enabled": True,
     },
     "analyst": {
         "username": "analyst",
-        "hashed_password": pwd_context.hash("analyst123"),  # Change in production!
+        "password": "analyst123",  # Change in production!
         "role": "analyst",
         "enabled": True,
     },
 }
+
+# Pre-hashed passwords cache to avoid repeated hashing on startup
+_precomputed_hashes: dict[str, str] = {}
 
 
 class User(BaseModel):
@@ -72,7 +75,25 @@ def get_password_hash(password: str) -> str:
 
 def get_user(username: str) -> Optional[dict]:
     """Get user by username."""
-    return _users.get(username)
+    user_data = _users.get(username)
+    if user_data and user_data.get("hashed_password"):
+        return user_data
+    
+    # If user exists but doesn't have precomputed hash, compute it
+    if user_data and "password" in user_data:
+        # Compute and cache the hash
+        password_to_hash = user_data["password"]
+        if username not in _precomputed_hashes:
+            _precomputed_hashes[username] = pwd_context.hash(password_to_hash[:72])  # Limit to 72 chars
+        # Return user data with hashed password
+        return {
+            "username": user_data["username"],
+            "hashed_password": _precomputed_hashes[username],
+            "role": user_data["role"],
+            "enabled": user_data["enabled"]
+        }
+    
+    return user_data
 
 
 def authenticate_user(username: str, password: str) -> Optional[dict]:

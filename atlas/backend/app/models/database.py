@@ -199,7 +199,7 @@ class AlertRecord(Base):
     risk_level = Column(String(20), nullable=False)
     
     # Metadata
-    metadata = Column(JSON, default=dict)
+    alert_metadata = Column(JSON, default=dict)
     
     # Acknowledgment/Resolution
     acknowledged_at = Column(DateTime)
@@ -219,12 +219,30 @@ class AlertRecord(Base):
 
 
 # Async engine and session
-async_engine = create_async_engine(
-    settings.database_url,
-    echo=settings.database_echo,
-    pool_size=20,
-    max_overflow=10,
-)
+# Configure engine differently based on database type
+if settings.database_url.startswith("sqlite"):
+    # SQLite doesn't support connection pooling
+    async_engine = create_async_engine(
+        settings.database_url,
+        echo=settings.database_echo,
+        connect_args={
+            "timeout": 30
+        }
+    )
+else:
+    # PostgreSQL and other databases support connection pooling
+    async_engine = create_async_engine(
+        settings.database_url,
+        echo=settings.database_echo,
+        pool_size=20,
+        max_overflow=10,
+        connect_args={
+            "ssl": None,
+            "server_settings": {
+                "application_name": "atlas_api"
+            }
+        }
+    )
 
 async_session_maker = async_sessionmaker(
     async_engine,

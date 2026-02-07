@@ -208,6 +208,11 @@ This MVP version excludes enterprise features:
 - ❌ Feature store (inline feature engineering)
 - ❌ Triton Inference Server (direct Python inference)
 
+## Authors
+
+- **MADIEGA S AIDA JUSTINE** - Lead Developer
+- **Demilade Ayeku** - Collaborator
+
 ## License
 
 MIT License - see LICENSE file for details.

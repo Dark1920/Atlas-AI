@@ -21,10 +21,8 @@ import uuid
 
 
 # Configuration
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/atlas"
-)
+from app.config import settings
+DATABASE_URL = settings.database_url
 NUM_TRANSACTIONS = 200
 FRAUD_RATE = 0.05
 
@@ -90,7 +88,7 @@ async def main():
                 is_new_device = random.random() < 0.1
             
             # Generate timestamp (last 7 days)
-            timestamp = datetime.utcnow() - timedelta(
+            timestamp = datetime.now() - timedelta(
                 days=random.randint(0, 7),
                 hours=random.randint(0, 23),
                 minutes=random.randint(0, 59)
@@ -120,8 +118,8 @@ async def main():
                 }
             }
             
-            # Score transaction
-            assessment = risk_scorer.score_transaction(transaction)
+            # Score transaction (async method)
+            assessment = await risk_scorer.score_transaction(transaction)
             
             # Store in database
             location = transaction["location"]

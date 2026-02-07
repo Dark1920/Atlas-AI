@@ -566,7 +566,7 @@ async def list_alerts(
             description=a.description,
             risk_score=a.risk_score,
             risk_level=a.risk_level,
-            metadata=a.metadata,
+            alert_metadata=a.metadata,
             created_at=a.created_at,
             acknowledged_at=a.acknowledged_at,
             acknowledged_by=a.acknowledged_by,
@@ -606,7 +606,7 @@ async def get_alert_detail(
         description=alert.description,
         risk_score=alert.risk_score,
         risk_level=alert.risk_level,
-        metadata=alert.metadata,
+        alert_metadata=alert.metadata,
         created_at=alert.created_at,
         acknowledged_at=alert.acknowledged_at,
         acknowledged_by=alert.acknowledged_by,
@@ -642,7 +642,7 @@ async def acknowledge_alert(
         description=alert.description,
         risk_score=alert.risk_score,
         risk_level=alert.risk_level,
-        metadata=alert.metadata,
+        alert_metadata=alert.metadata,
         created_at=alert.created_at,
         acknowledged_at=alert.acknowledged_at,
         acknowledged_by=alert.acknowledged_by,
@@ -678,7 +678,7 @@ async def resolve_alert(
         description=alert.description,
         risk_score=alert.risk_score,
         risk_level=alert.risk_level,
-        metadata=alert.metadata,
+        alert_metadata=alert.metadata,
         created_at=alert.created_at,
         acknowledged_at=alert.acknowledged_at,
         acknowledged_by=alert.acknowledged_by,
@@ -728,7 +728,7 @@ async def list_patterns(
                 confidence=p.confidence,
                 affected_transactions=p.affected_transactions,
                 affected_users=p.affected_users,
-                metadata=p.metadata,
+                pattern_metadata=p.metadata,
                 detected_at=p.detected_at,
             )
             for p in patterns
@@ -755,7 +755,7 @@ async def get_pattern_detail(
         confidence=pattern.confidence,
         affected_transactions=pattern.affected_transactions,
         affected_users=pattern.affected_users,
-        metadata=pattern.metadata,
+        pattern_metadata=pattern.metadata,
         detected_at=pattern.detected_at,
     )
 

@@ -14,7 +14,15 @@ except ImportError:
     try:
         import aioredis
     except ImportError:
-        aioredis = None
+        # Create a mock module for type hints
+        import sys
+        import types
+        aioredis = types.ModuleType('aioredis')
+        # Create a mock Redis class for type hints
+        class MockRedis:
+            pass
+        aioredis.Redis = MockRedis
+        sys.modules['aioredis'] = aioredis
 from functools import wraps
 
 from app.config import settings
@@ -22,7 +30,9 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # Global Redis connection pool
-_redis_client: Optional[aioredis.Redis] = None
+# Use Any to avoid import issues when redis is not available
+from typing import Any
+_redis_client: Optional[Any] = None
 
 
 async def get_redis_client():
@@ -67,9 +77,9 @@ class RedisCache:
     
     def __init__(self):
         self.default_ttl = settings.cache_ttl
-        self._client: Optional[aioredis.Redis] = None
+        self._client: Optional[Any] = None
     
-    async def _get_client(self) -> Optional[aioredis.Redis]:
+    async def _get_client(self) -> Optional[Any]:
         """Get Redis client, return None if unavailable."""
         if self._client is None:
             self._client = await get_redis_client()

@@ -383,6 +383,12 @@ class FeatureEngineer:
         
         for txn in recent_txns:
             txn_time = txn.get("timestamp", datetime.utcnow())
+            if isinstance(txn_time, str):
+                try:
+                    txn_time = datetime.fromisoformat(txn_time.replace("Z", "+00:00"))
+                except ValueError:
+                    # If parsing fails, use current time as fallback
+                    txn_time = datetime.utcnow()
             if txn_time >= one_hour_ago:
                 txn_count_1h += 1
                 amount_sum_1h += txn.get("amount", 0)
