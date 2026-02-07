@@ -263,6 +263,7 @@
 #         yield session
 
 
+
 """
 SQLAlchemy Database Models and Connection
 """
@@ -331,6 +332,4 @@ async def get_async_session() -> AsyncSession:
     """Get async database session."""
     async with async_session_maker() as session:
         yield session
-
-
 
