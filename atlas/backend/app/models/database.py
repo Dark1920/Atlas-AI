@@ -268,7 +268,6 @@ SQLAlchemy Database Models and Connection
 from datetime import datetime
 import os
 import logging
-from typing import Optional
 
 from sqlalchemy import (
     Column, String, Float, Integer, DateTime, Text, Boolean,
@@ -299,7 +298,7 @@ class TransactionRecord(Base):
 # ✅ Configuration de la base de données
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Adapter l’URL pour asyncpg si Render fournit postgres://
+# ⚠️ Correction : Render fournit postgres:// → on force asyncpg
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://")
 
